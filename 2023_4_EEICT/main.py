@@ -82,6 +82,27 @@ class GaussianProcess:
 
 ################################################################################
 
+def meanVecGP(gp, pos):
+    """Get GP mean values at given positions"""
+
+    nPos = pos.shape[0]
+    meanVec = np.zeros(nPos)
+    for i in range(nPos):
+        meanVec[i] = gp.meanFunc(pos[i, :])
+
+    return meanVec
+
+def covMatGP(gp, pos):
+    """Get GP covariance matrix at given positions"""
+
+    nPos = pos.shape[0]
+    covMat = np.zeros((nPos, nPos))
+    for row in range(nPos):
+        for col in range(nPos):
+            covMat[row, col] = gp.covFunc(pos[row, :], pos[col, :])
+
+    return covMat
+
 def gpr(gp, trainPos, testPos, trainObs, obsVar):
     """GPR standard evaluation"""
 
@@ -89,15 +110,9 @@ def gpr(gp, trainPos, testPos, trainObs, obsVar):
     if(nTrainPos != trainObs.size):
         raise Exception("different number of training positions and function observations")
 
-    meanVec_m = np.zeros(nTrainPos)
-    for i in range(nTrainPos):
-        meanVec_m[i] = gp.meanFunc(trainPos[i, :])
+    meanVec_m = meanVecGP(gp, trainPos)
 
-    covMat_K = np.zeros((nTrainPos, nTrainPos))
-    for row in range(nTrainPos):
-        for col in range(nTrainPos):
-            covMat_K[row, col] = gp.covFunc(trainPos[row, :], trainPos[col, :])
-
+    covMat_K = covMatGP(gp, trainPos)
     covMat_Q = covMat_K + obsVar*np.identity(nTrainPos)
 
     crossCovVec_c = np.zeros(nTrainPos)
@@ -112,16 +127,32 @@ def gpr(gp, trainPos, testPos, trainObs, obsVar):
 
     return (postMean, postVar)
 
+def realizeGP(gp, pos, regCoef):
+    """Generate realization vector of given GP on given positions"""
+
+    nPos = pos.shape[0]
+    meanVec = meanVecGP(gp, pos)
+    covMat = covMatGP(gp, pos) + regCoef*np.identity(nPos)      # Regularization ensuring positive definiteness
+    choleskyCovMat = np.linalg.cholesky(covMat)
+    iidGaussVec = np.random.normal(0, 1, nPos)    # Vector of iid Gaussian zero mean unit st. d. RVs
+
+    realizationVec = meanVec + np.dot(choleskyCovMat, iidGaussVec)
+
+    return realizationVec
+
 ################################################################################
 
 trainPos = np.array([[0, 0], [1, 1], [2, 2]])
-trainObs = np.array([1, 2, 3])
 testPos = np.array([3, 3])
-obsVar = simSetup["obsVar"]
+allPos = np.append(trainPos, [testPos], axis=0)
 
 trueGP = GaussianProcess()
 trueGP.setMeanFuncConst(simSetup["meanGP"]["value"])
 trueGP.setCovFuncSquaredExp(simSetup["covGP"]["var"], simSetup["covGP"]["var_x"])
 
-posteriorParam = gpr(trueGP, trainPos, testPos, trainObs, obsVar)
+allRealizations = realizeGP(trueGP, allPos, simSetup["regCoef"])
+trainRealizations = allRealizations[0:trainPos.shape[0]]
+trainObs = trainRealizations + np.random.normal(0, np.sqrt(simSetup["obsVar"]), trainPos.shape[0])
+
+posteriorParam = gpr(trueGP, trainPos, testPos, trainObs, simSetup["obsVar"])
 print(posteriorParam)
