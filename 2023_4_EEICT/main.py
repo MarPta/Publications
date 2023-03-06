@@ -28,23 +28,6 @@ simSetup = {
     "time": datetime.datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 }
 
-def meanFuncGP(setup, x_a):
-    """GP mean function m"""
-
-    if setup["meanGP"]["name"] == "constant" and "value" in setup["meanGP"]:
-        return setup["meanGP"]["value"]
-
-    raise Exception("invalid GP mean function setup")
-
-
-def covarianceFuncGP(setup, x_a, x_b):
-    """GP covariance function "k" of 2 position vectors"""
-
-    if setup["covGP"]["name"] == "squared exponential":
-        return squaredExpCovFunc(x_a, x_b, setup["covGP"]["sigma_x"], setup["covGP"]["sigma_x"])
-    
-    raise Exception("invalid GP covariance function setup")
-
 ################################################################################
 
 def squaredExpCovFunc(x_a, x_b, var, var_x):
@@ -114,18 +97,25 @@ def gpr(gp, trainPos, testPos, trainObs, obsVar):
 
     covMat_K = covMatGP(gp, trainPos)
     covMat_Q = covMat_K + obsVar*np.identity(nTrainPos)
-
-    crossCovVec_c = np.zeros(nTrainPos)
-    for i in range(nTrainPos):
-        crossCovVec_c[i] = gp.covFunc(testPos, trainPos[i, :])
-
     covMatInv_Q = np.linalg.inv(covMat_Q)
-    c_t_dot_Q_inv = np.dot(crossCovVec_c, covMatInv_Q)
 
-    postMean = gp.meanFunc(testPos) + np.dot(c_t_dot_Q_inv, (trainObs - meanVec_m))
-    postVar = gp.covFunc(testPos, testPos) - np.dot(c_t_dot_Q_inv, crossCovVec_c)
+    nTestPos = testPos.shape[0]
+    if(nTestPos < 1):
+        raise Exception("at least 1 test position must be provided")
+    postDistMat = np.zeros((nTestPos, 2))
 
-    return (postMean, postVar)
+    for testPosID in range(nTestPos):
+        crossCovVec_c = np.zeros(nTrainPos)
+        for trainPosID in range(nTrainPos):
+            crossCovVec_c[trainPosID] = gp.covFunc(testPos[testPosID, :], trainPos[trainPosID, :])
+
+        c_t_dot_Q_inv = np.dot(crossCovVec_c, covMatInv_Q)
+
+        postMean = gp.meanFunc(testPos) + np.dot(c_t_dot_Q_inv, (trainObs - meanVec_m))
+        postVar = gp.covFunc(testPos, testPos) - np.dot(c_t_dot_Q_inv, crossCovVec_c)
+        postDistMat[testPosID, :] = np.array([postMean, postVar])
+
+    return postDistMat
 
 def realizeGP(gp, pos, regCoef):
     """Generate realization vector of given GP on given positions"""
@@ -143,8 +133,8 @@ def realizeGP(gp, pos, regCoef):
 ################################################################################
 
 trainPos = np.array([[0, 0], [1, 1], [2, 2]])
-testPos = np.array([3, 3])
-allPos = np.append(trainPos, [testPos], axis=0)
+testPos = np.array([[3, 3], [4, 4]])
+allPos = np.append(trainPos, testPos, axis=0)
 
 trueGP = GaussianProcess()
 trueGP.setMeanFuncConst(simSetup["meanGP"]["value"])
@@ -154,5 +144,7 @@ allRealizations = realizeGP(trueGP, allPos, simSetup["regCoef"])
 trainRealizations = allRealizations[0:trainPos.shape[0]]
 trainObs = trainRealizations + np.random.normal(0, np.sqrt(simSetup["obsVar"]), trainPos.shape[0])
 
+testRealization = allRealizations[-testPos.shape[0]-1: -1]
+print(testRealization)
 posteriorParam = gpr(trueGP, trainPos, testPos, trainObs, simSetup["obsVar"])
 print(posteriorParam)
