@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import datetime
+import itertools
 
 path = os.path.dirname(__file__)
 
@@ -17,14 +18,11 @@ simSetup = {
         "var": 4,                           # GP single variable variance
         "var_x": 2                          # GP spatial scale variance
     },
-    "space": {
-        "name": "flat rect",
-        "nDimensions": 2,
-        "size": (10, 5)
-    },
+    "spaceSize": (10, 5),
     "nTrainPos": 20,
-    "regCoef": 0.001,                   # Regularization coefficient of GP covariance matrix to ensure positive definiteness
-    "obsVar": 0.01,                     # GP observation noise variance
+    "testPosRes": 2,            # Positions per spatial unit
+    "regCoef": 0.001,           # Regularization coefficient of GP covariance matrix to ensure positive definiteness
+    "obsVar": 0.01,             # GP observation noise variance
     "time": datetime.datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 }
 
@@ -55,13 +53,12 @@ class GaussianProcess:
         self.var_x = var_x
 
     def meanFunc(self, x_a):
-        if(self.meanType == "constant"):
+        if self.meanType == "constant":
             return self.meanValue
 
     def covFunc(self, x_a, x_b):
-        if(self.covType == "squared exponential"):
+        if self.covType == "squared exponential":
             return squaredExpCovFunc(x_a, x_b, self.var, self.var_x)
-        
 
 ################################################################################
 
@@ -90,7 +87,7 @@ def gpr(gp, trainPos, testPos, trainObs, obsVar):
     """GPR standard evaluation"""
 
     nTrainPos = trainPos.shape[0]
-    if(nTrainPos != trainObs.size):
+    if nTrainPos != trainObs.size:
         raise Exception("different number of training positions and function observations")
 
     meanVec_m = meanVecGP(gp, trainPos)
@@ -100,7 +97,7 @@ def gpr(gp, trainPos, testPos, trainObs, obsVar):
     covMatInv_Q = np.linalg.inv(covMat_Q)
 
     nTestPos = testPos.shape[0]
-    if(nTestPos < 1):
+    if nTestPos < 1:
         raise Exception("at least 1 test position must be provided")
     postDistMat = np.zeros((nTestPos, 2))
 
@@ -130,10 +127,53 @@ def realizeGP(gp, pos, regCoef):
 
     return realizationVec
 
+def rmse(estimates, realizations):
+    """Evaluate RMSE of given vector of estimated values based on given vector true realized values"""
+
+    nPoints = estimates.size
+    if nPoints != realizations.size:
+        raise Exception("count of erstimates and realizations must be equal")
+
+    diff = estimates - realizations
+    squares = np.power(diff, 2)
+    sum =  np.sum(squares)
+    error = np.sqrt(sum/nPoints)
+    return error
+
+def genTrainPosUni(size, nPos):
+    """Generate column vector of training positions based on given space size of given length"""
+
+    pos = np.zeros((nPos, len(size)))
+
+    for posID in range(nPos):
+        for dimID in range(len(size)):
+            pos[posID, dimID] = np.random.uniform(size[dimID])
+
+    return pos
+
+def genTestPosGrid(size, res):
+    """Generate column vector of test positions representing grid over given space size in given resolution"""
+
+    step = 1/res
+
+    dimSteps = []
+    for dimID in range(len(size)):
+        nSteps = int(size[dimID]/step)
+        steps = range(nSteps)
+        steps = [i*step for i in steps]
+        dimSteps.append(steps)
+
+    posGridList = list(itertools.product(*dimSteps))
+    posGrid = np.zeros((len(posGridList), len(size)))
+    for posID in range(len(posGridList)):
+        posGrid[posID, :] = np.asarray(posGridList[posID])
+
+    return posGrid
+
 ################################################################################
 
-trainPos = np.array([[0, 0], [1, 1], [2, 2]])
-testPos = np.array([[3, 3], [4, 4]])
+trainPos = genTrainPosUni(simSetup["spaceSize"], simSetup["nTrainPos"])
+testPos = genTestPosGrid(simSetup["spaceSize"], simSetup["testPosRes"])
 allPos = np.append(trainPos, testPos, axis=0)
 
 trueGP = GaussianProcess()
@@ -145,6 +185,5 @@ trainRealizations = allRealizations[0:trainPos.shape[0]]
 trainObs = trainRealizations + np.random.normal(0, np.sqrt(simSetup["obsVar"]), trainPos.shape[0])
 
 testRealization = allRealizations[-testPos.shape[0]-1: -1]
-print(testRealization)
 posteriorParam = gpr(trueGP, trainPos, testPos, trainObs, simSetup["obsVar"])
-print(posteriorParam)
+print(rmse(posteriorParam[:, 0], testRealization))
