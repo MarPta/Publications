@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 import os
 import datetime
 import itertools
+import plotly.graph_objects as go
+import plotly.io as pio
+
+pio.kaleido.scope.mathjax = None    # Surpress Plotly PDF export mathjax warning
 
 path = os.path.dirname(__file__)
 
@@ -15,12 +19,12 @@ simSetup = {
     },
     "covGP": {
         "name": "squared exponential",
-        "var": 4,                           # GP single variable variance
-        "var_x": 2                          # GP spatial scale variance
+        "var": 1,                           # GP single variable variance
+        "var_x": 1                          # GP spatial scale variance
     },
-    "spaceSize": (10, 5),
-    "nTrainPos": 20,
-    "testPosRes": 2,            # Positions per spatial unit
+    "spaceSize": (2, 1),
+    "nTrainPos": 10,
+    "testPosRes": 10,            # Positions per spatial unit
     "regCoef": 0.001,           # Regularization coefficient of GP covariance matrix to ensure positive definiteness
     "obsVar": 0.01,             # GP observation noise variance
     "time": datetime.datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
@@ -132,7 +136,7 @@ def rmse(estimates, realizations):
 
     nPoints = estimates.size
     if nPoints != realizations.size:
-        raise Exception("count of erstimates and realizations must be equal")
+        raise Exception("count of estimates and realizations must be equal")
 
     diff = estimates - realizations
     squares = np.power(diff, 2)
@@ -141,13 +145,13 @@ def rmse(estimates, realizations):
     return error
 
 def genTrainPosUni(size, nPos):
-    """Generate column vector of training positions based on given space size of given length"""
+    """Generate column vector of training positions uniformly distributed in given space size"""
 
     pos = np.zeros((nPos, len(size)))
 
     for posID in range(nPos):
         for dimID in range(len(size)):
-            pos[posID, dimID] = np.random.uniform(size[dimID])
+            pos[posID, dimID] = np.random.uniform(low=0, high=size[dimID])
 
     return pos
 
@@ -155,13 +159,14 @@ def genTestPosGrid(size, res):
     """Generate column vector of test positions representing grid over given space size in given resolution"""
 
     step = 1/res
-
     dimSteps = []
     for dimID in range(len(size)):
-        nSteps = int(size[dimID]/step)
-        steps = range(nSteps)
-        steps = [i*step for i in steps]
+        nSteps = int(size[dimID]/step) + 1  # Include 1 point at the end to span to full range
+        sequence = range(nSteps)
+        steps = [i*step for i in sequence]
         dimSteps.append(steps)
+
+    # var = np.meshgrid(*dimSteps) # Possible to evaluate only using NumPy
 
     posGridList = list(itertools.product(*dimSteps))
     posGrid = np.zeros((len(posGridList), len(size)))
@@ -169,6 +174,59 @@ def genTestPosGrid(size, res):
         posGrid[posID, :] = np.asarray(posGridList[posID])
 
     return posGrid
+
+def plotData(size, res, data, positions, posColor="White", filePath="fig", show=False):
+    step = 1/res
+    dimSteps = []
+    for dimID in range(len(size)):
+        nSteps = int(size[dimID]/step) + 1
+        steps = range(nSteps)
+        steps = [i*step for i in steps]
+        dimSteps.append(steps)
+
+    newShape = (len(dimSteps[0]), len(dimSteps[1]))
+    dataPlot = np.transpose(np.reshape(data, newShape))
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Contour(
+            x=dimSteps[0],
+            y=dimSteps[1],
+            z=dataPlot,
+            contours_coloring="heatmap"
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            mode="markers",
+            x=trainPos[:, 0],
+            y=trainPos[:, 1],
+            marker=dict(
+                color=posColor,
+                size=10,
+                line=dict(
+                    color="Black",
+                    width=2
+                )
+            )
+        )
+    )
+    fig.update_xaxes(
+        title_text = "Spatial dimension X"
+    )
+    fig.update_yaxes(
+        title_text = "Spatial dimension Y",
+        scaleanchor="x", 
+        scaleratio=1
+    )
+    fig.update_layout(
+        width =600, height=300, 
+        font_family="Serif", font_size=15,
+        margin=dict(l=0, r=0, t=0, b=0),
+    )
+    fig.write_image(filePath)
+    if show:
+        fig.show()
 
 ################################################################################
 
@@ -184,6 +242,8 @@ allRealizations = realizeGP(trueGP, allPos, simSetup["regCoef"])
 trainRealizations = allRealizations[0:trainPos.shape[0]]
 trainObs = trainRealizations + np.random.normal(0, np.sqrt(simSetup["obsVar"]), trainPos.shape[0])
 
-testRealization = allRealizations[-testPos.shape[0]-1: -1]
+testRealization = allRealizations[-testPos.shape[0]: None]
 posteriorParam = gpr(trueGP, trainPos, testPos, trainObs, simSetup["obsVar"])
 print(rmse(posteriorParam[:, 0], testRealization))
+
+plotData(simSetup["spaceSize"], simSetup["testPosRes"], testRealization, trainPos, "Blue", path + "/fig.pdf", True)
