@@ -46,6 +46,23 @@ def rmse(estimates, realizations):
     error = np.sqrt(sum/nPoints)
     return error
 
+def sigDig(num):
+    """Print real number into string with 4 significant digits"""
+    strOut= ""
+    strIn = str(num)
+    if "." in strIn:
+        precIndex = strIn.find(".")
+        if precIndex == 1 and strIn[0] == "0":
+            numChars = 6
+        else:
+            numChars = 5
+        for i in range(numChars):
+            if i < len(strIn):
+                strOut += strIn[i]
+            else:
+                strOut += "0"
+    return strOut
+
 ################################################################################
 
 def squaredExpCovFunc(x_a, x_b, var, var_x):
@@ -236,6 +253,8 @@ def gpr(gp, trainPos, testPos, trainObs, obsVar):
 ################################################################################
 
 def genPosSample(pos, var):
+    """Generate vector of positions with AWGN according to provided positions and variance"""
+
     posSample = np.zeros((pos.shape[0], pos.shape[1]))
 
     for posID in range(pos.shape[0]):
@@ -245,12 +264,33 @@ def genPosSample(pos, var):
     return posSample
 
 def genPosSamples(pos, var, nSamples):
+    """Generate multiple vectors of positions with AWGN according to provided positions and variance"""
+
     posSamples = np.zeros((nSamples, pos.shape[0], pos.shape[1]))
 
     for sampleID in range(nSamples):
         posSamples[sampleID, :, :] = genPosSample(pos, var)
 
     return posSamples
+
+def gprMC(gp, trainPosSamples, testPos, trainObs, obsVar):
+    """GPR evaluation with uncertain training positions using MC"""
+
+    nTrainPosSamples = trainPosSamples.shape[0]
+    nTrainPos = trainPosSamples.shape[1]
+    if nTrainPos != trainObs.size:
+        raise Exception("different number of training positions and function observations")
+
+    nTestPos = testPos.shape[0]
+    if nTestPos < 1:
+        raise Exception("at least 1 test position must be provided")
+
+    postDistSamples = np.zeros((nTrainPosSamples, nTestPos, 2))
+    for sampleID in range(nTrainPosSamples):
+        postDistSamples[sampleID, :, :] = gpr(gp, trainPosSamples[sampleID, :, :], testPos, trainObs, obsVar)
+
+    postDistMat = np.average(postDistSamples, axis=0)
+    return postDistMat
 
 ################################################################################
 
@@ -267,11 +307,21 @@ trainRealizations = allRealizations[0:trainPos.shape[0]]
 trainObs = trainRealizations + np.random.normal(0, np.sqrt(simSetup["obsVar"]), trainPos.shape[0])
 
 testRealization = allRealizations[-testPos.shape[0]: None]
-posteriorParam = gpr(trueGP, trainPos, testPos, trainObs, simSetup["obsVar"])
-print(rmse(posteriorParam[:, 0], testRealization))
+posteriorParamTrue = gpr(trueGP, trainPos, testPos, trainObs, simSetup["obsVar"])
 
 trainPosObs = genPosSample(trainPos, simSetup["trainPosVar"])
+posteriorParamObs = gpr(trueGP, trainPosObs, testPos, trainObs, simSetup["obsVar"])
+
 trainPosSamples = genPosSamples(trainPosObs, simSetup["trainPosVar"], simSetup["nSamplesMC"])
+posteriorParamMC = gprMC(trueGP, trainPosSamples, testPos, trainObs, simSetup["obsVar"])
 
 plotData(simSetup["spaceSize"], simSetup["testPosRes"], testRealization, trainPos, "Blue", path + "/realization.pdf")
-plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParam[:, 0], trainPos, "Blue", path + "/postMean.pdf")
+plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamTrue[:, 0], trainPos, "Blue", path + "/postMeanTrue.pdf")
+plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamObs[:, 0], trainPosObs, "Green", path + "/postMeanObs.pdf")
+plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamMC[:, 0], trainPosObs, "Green", path + "/postMeanObsMC.pdf")
+
+results = np.zeros(3)
+results[0] = rmse(posteriorParamTrue[:, 0], testRealization)
+results[1] = rmse(posteriorParamObs[:, 0], testRealization)
+results[2] = rmse(posteriorParamMC[:, 0], testRealization)
+print("RMSE postMeanTrue: %s, postMeanObs: %s, postMeanMC: %s"%(sigDig(results[0]), sigDig(results[1]), sigDig(results[2])))
