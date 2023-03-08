@@ -11,8 +11,6 @@ pio.kaleido.scope.mathjax = None    # Surpress Plotly PDF export mathjax warning
 path = os.path.dirname(__file__)
 
 simSetup = {
-    "nSamplesMC": 100,
-    "nSimulations": 1,
     "meanGP": {
         "name": "constant",
         "value": 0
@@ -24,11 +22,29 @@ simSetup = {
     },
     "spaceSize": (2, 1),
     "nTrainPos": 10,
-    "testPosRes": 10,            # Positions per spatial unit
+    "testPosRes": 10,           # Positions per spatial unit
     "regCoef": 0.001,           # Regularization coefficient of GP covariance matrix to ensure positive definiteness
     "obsVar": 0.01,             # GP observation noise variance
+    "trainPosVar": 0.01,          # training positions observation variance
+    "nSamplesMC": 100,
+    "nSimulations": 1,
     "time": datetime.datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 }
+
+################################################################################
+
+def rmse(estimates, realizations):
+    """Evaluate RMSE of given vector of estimated values based on given vector true realized values"""
+
+    nPoints = estimates.size
+    if nPoints != realizations.size:
+        raise Exception("count of estimates and realizations must be equal")
+
+    diff = estimates - realizations
+    squares = np.power(diff, 2)
+    sum =  np.sum(squares)
+    error = np.sqrt(sum/nPoints)
+    return error
 
 ################################################################################
 
@@ -39,8 +55,6 @@ def squaredExpCovFunc(x_a, x_b, var, var_x):
         raise Exception("invalid squared exponential function parameters")
 
     return var * np.exp(-((np.linalg.norm(x_a - x_b)**2)/(2*var_x)))
-
-################################################################################
 
 class GaussianProcess:
     def __init__(self):
@@ -63,86 +77,8 @@ class GaussianProcess:
     def covFunc(self, x_a, x_b):
         if self.covType == "squared exponential":
             return squaredExpCovFunc(x_a, x_b, self.var, self.var_x)
-
+        
 ################################################################################
-
-def meanVecGP(gp, pos):
-    """Get GP mean values at given positions"""
-
-    nPos = pos.shape[0]
-    meanVec = np.zeros(nPos)
-    for i in range(nPos):
-        meanVec[i] = gp.meanFunc(pos[i, :])
-
-    return meanVec
-
-def covMatGP(gp, pos):
-    """Get GP covariance matrix at given positions"""
-
-    nPos = pos.shape[0]
-    covMat = np.zeros((nPos, nPos))
-    for row in range(nPos):
-        for col in range(nPos):
-            covMat[row, col] = gp.covFunc(pos[row, :], pos[col, :])
-
-    return covMat
-
-def gpr(gp, trainPos, testPos, trainObs, obsVar):
-    """GPR standard evaluation"""
-
-    nTrainPos = trainPos.shape[0]
-    if nTrainPos != trainObs.size:
-        raise Exception("different number of training positions and function observations")
-
-    meanVec_m = meanVecGP(gp, trainPos)
-
-    covMat_K = covMatGP(gp, trainPos)
-    covMat_Q = covMat_K + obsVar*np.identity(nTrainPos)
-    covMatInv_Q = np.linalg.inv(covMat_Q)
-
-    nTestPos = testPos.shape[0]
-    if nTestPos < 1:
-        raise Exception("at least 1 test position must be provided")
-    postDistMat = np.zeros((nTestPos, 2))
-
-    for testPosID in range(nTestPos):
-        crossCovVec_c = np.zeros(nTrainPos)
-        for trainPosID in range(nTrainPos):
-            crossCovVec_c[trainPosID] = gp.covFunc(testPos[testPosID, :], trainPos[trainPosID, :])
-
-        c_t_dot_Q_inv = np.dot(crossCovVec_c, covMatInv_Q)
-
-        postMean = gp.meanFunc(testPos) + np.dot(c_t_dot_Q_inv, (trainObs - meanVec_m))
-        postVar = gp.covFunc(testPos, testPos) - np.dot(c_t_dot_Q_inv, crossCovVec_c)
-        postDistMat[testPosID, :] = np.array([postMean, postVar])
-
-    return postDistMat
-
-def realizeGP(gp, pos, regCoef):
-    """Generate realization vector of given GP on given positions"""
-
-    nPos = pos.shape[0]
-    meanVec = meanVecGP(gp, pos)
-    covMat = covMatGP(gp, pos) + regCoef*np.identity(nPos)      # Regularization ensuring positive definiteness
-    choleskyCovMat = np.linalg.cholesky(covMat)
-    iidGaussVec = np.random.normal(0, 1, nPos)    # Vector of iid Gaussian zero mean unit st. d. RVs
-
-    realizationVec = meanVec + np.dot(choleskyCovMat, iidGaussVec)
-
-    return realizationVec
-
-def rmse(estimates, realizations):
-    """Evaluate RMSE of given vector of estimated values based on given vector true realized values"""
-
-    nPoints = estimates.size
-    if nPoints != realizations.size:
-        raise Exception("count of estimates and realizations must be equal")
-
-    diff = estimates - realizations
-    squares = np.power(diff, 2)
-    sum =  np.sum(squares)
-    error = np.sqrt(sum/nPoints)
-    return error
 
 def genTrainPosUni(size, nPos):
     """Generate column vector of training positions uniformly distributed in given space size"""
@@ -175,7 +111,9 @@ def genTestPosGrid(size, res):
 
     return posGrid
 
-def plotData(size, res, data, positions, posColor="White", filePath="fig", show=False):
+################################################################################
+
+def plotData(size, res, data, pos, posColor="White", filePath="fig", show=False):
     step = 1/res
     dimSteps = []
     for dimID in range(len(size)):
@@ -199,8 +137,8 @@ def plotData(size, res, data, positions, posColor="White", filePath="fig", show=
     fig.add_trace(
         go.Scatter(
             mode="markers",
-            x=trainPos[:, 0],
-            y=trainPos[:, 1],
+            x=pos[:, 0],
+            y=pos[:, 1],
             marker=dict(
                 color=posColor,
                 size=10,
@@ -230,6 +168,92 @@ def plotData(size, res, data, positions, posColor="White", filePath="fig", show=
 
 ################################################################################
 
+def meanVecGP(gp, pos):
+    """Get GP mean values at given positions"""
+
+    nPos = pos.shape[0]
+    meanVec = np.zeros(nPos)
+    for i in range(nPos):
+        meanVec[i] = gp.meanFunc(pos[i, :])
+
+    return meanVec
+
+def covMatGP(gp, pos):
+    """Get GP covariance matrix at given positions"""
+
+    nPos = pos.shape[0]
+    covMat = np.zeros((nPos, nPos))
+    for row in range(nPos):
+        for col in range(nPos):
+            covMat[row, col] = gp.covFunc(pos[row, :], pos[col, :])
+
+    return covMat
+
+def realizeGP(gp, pos, regCoef):
+    """Generate realization vector of given GP on given positions"""
+
+    nPos = pos.shape[0]
+    meanVec = meanVecGP(gp, pos)
+    covMat = covMatGP(gp, pos) + regCoef*np.identity(nPos)      # Regularization ensuring positive definiteness
+    choleskyCovMat = np.linalg.cholesky(covMat)
+    iidGaussVec = np.random.normal(0, 1, nPos)    # Vector of iid Gaussian zero mean unit st. d. RVs
+
+    realizationVec = meanVec + np.dot(choleskyCovMat, iidGaussVec)
+
+    return realizationVec
+
+def gpr(gp, trainPos, testPos, trainObs, obsVar):
+    """GPR standard evaluation"""
+
+    nTrainPos = trainPos.shape[0]
+    if nTrainPos != trainObs.size:
+        raise Exception("different number of training positions and function observations")
+
+    meanVec_m = meanVecGP(gp, trainPos)
+
+    covMat_K = covMatGP(gp, trainPos)
+    covMat_Q = covMat_K + obsVar*np.identity(nTrainPos)
+    covMatInv_Q = np.linalg.inv(covMat_Q)
+
+    nTestPos = testPos.shape[0]
+    if nTestPos < 1:
+        raise Exception("at least 1 test position must be provided")
+    postDistMat = np.zeros((nTestPos, 2))
+
+    for testPosID in range(nTestPos):
+        crossCovVec_c = np.zeros(nTrainPos)
+        for trainPosID in range(nTrainPos):
+            crossCovVec_c[trainPosID] = gp.covFunc(testPos[testPosID, :], trainPos[trainPosID, :])
+
+        c_t_dot_Q_inv = np.dot(crossCovVec_c, covMatInv_Q)
+
+        postMean = gp.meanFunc(testPos) + np.dot(c_t_dot_Q_inv, (trainObs - meanVec_m))
+        postVar = gp.covFunc(testPos, testPos) - np.dot(c_t_dot_Q_inv, crossCovVec_c)
+        postDistMat[testPosID, :] = np.array([postMean, postVar])
+
+    return postDistMat
+
+################################################################################
+
+def genPosSample(pos, var):
+    posSample = np.zeros((pos.shape[0], pos.shape[1]))
+
+    for posID in range(pos.shape[0]):
+        for dimID in range(pos.shape[1]):
+            posSample[posID, dimID] = pos[posID, dimID] + np.random.normal(0, np.sqrt(var))
+
+    return posSample
+
+def genPosSamples(pos, var, nSamples):
+    posSamples = np.zeros((nSamples, pos.shape[0], pos.shape[1]))
+
+    for sampleID in range(nSamples):
+        posSamples[sampleID, :, :] = genPosSample(pos, var)
+
+    return posSamples
+
+################################################################################
+
 trainPos = genTrainPosUni(simSetup["spaceSize"], simSetup["nTrainPos"])
 testPos = genTestPosGrid(simSetup["spaceSize"], simSetup["testPosRes"])
 allPos = np.append(trainPos, testPos, axis=0)
@@ -246,4 +270,8 @@ testRealization = allRealizations[-testPos.shape[0]: None]
 posteriorParam = gpr(trueGP, trainPos, testPos, trainObs, simSetup["obsVar"])
 print(rmse(posteriorParam[:, 0], testRealization))
 
-plotData(simSetup["spaceSize"], simSetup["testPosRes"], testRealization, trainPos, "Blue", path + "/fig.pdf", True)
+trainPosObs = genPosSample(trainPos, simSetup["trainPosVar"])
+trainPosSamples = genPosSamples(trainPosObs, simSetup["trainPosVar"], simSetup["nSamplesMC"])
+
+plotData(simSetup["spaceSize"], simSetup["testPosRes"], testRealization, trainPos, "Blue", path + "/realization.pdf")
+plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParam[:, 0], trainPos, "Blue", path + "/postMean.pdf")
