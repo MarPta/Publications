@@ -63,6 +63,12 @@ def sigDig(num):
                 strOut += "0"
     return strOut
 
+def addKeyValue(text, key, value):
+    addition = "\\newcommand{\%s}{%s}\n"%(key, value)
+    text = text + addition
+    return text
+    
+
 ################################################################################
 
 def squaredExpCovFunc(x_a, x_b, var, var_x):
@@ -346,3 +352,10 @@ for simulationID in range(nSimulations):
 
 results = np.average(allResults, axis=0)
 print("\nRMSE postMeanTrue: %s, postMeanObs: %s, postMeanMC: %s"%(sigDig(results[0]), sigDig(results[1]), sigDig(results[2])))
+
+resultsStr = ""
+resultsStr = addKeyValue(resultsStr, "rmseTrue", sigDig(results[0]))
+resultsStr = addKeyValue(resultsStr, "rmseObs", sigDig(results[1]))
+resultsStr = addKeyValue(resultsStr, "rmseObsMC", sigDig(results[2]))
+with open(path + "/results.tex", 'w') as res:
+    res.write(resultsStr)
