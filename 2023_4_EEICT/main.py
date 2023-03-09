@@ -25,8 +25,8 @@ simSetup = {
     "testPosRes": 10,           # Positions per spatial unit
     "regCoef": 0.001,           # Regularization coefficient of GP covariance matrix to ensure positive definiteness
     "obsVar": 0.01,             # GP observation noise variance
-    "trainPosVar": 0.01,          # training positions observation variance
-    "nSamplesMC": 100,
+    "trainPosVar": 0.001,        # training positions observation variance
+    "nSamplesMC": 10,
     "nSimulations": 1,
     "time": datetime.datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 }
@@ -289,7 +289,15 @@ def gprMC(gp, trainPosSamples, testPos, trainObs, obsVar):
     for sampleID in range(nTrainPosSamples):
         postDistSamples[sampleID, :, :] = gpr(gp, trainPosSamples[sampleID, :, :], testPos, trainObs, obsVar)
 
-    postDistMat = np.average(postDistSamples, axis=0)
+    postDistMat = np.zeros((nTestPos, 2))
+    for testPosID in range(nTestPos):
+        postDistSamplesTest = postDistSamples[:, testPosID, :]
+        postMean = np.average(postDistSamplesTest[:, 0], axis=0)
+        postVar = np.average(np.sum(np.power(postDistSamplesTest, 2), axis=1)) - postMean**2
+
+        postDistMat[testPosID, 0] = postMean
+        postDistMat[testPosID, 1] = postVar
+
     return postDistMat
 
 ################################################################################
@@ -319,6 +327,10 @@ plotData(simSetup["spaceSize"], simSetup["testPosRes"], testRealization, trainPo
 plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamTrue[:, 0], trainPos, "Blue", path + "/postMeanTrue.pdf")
 plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamObs[:, 0], trainPosObs, "Green", path + "/postMeanObs.pdf")
 plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamMC[:, 0], trainPosObs, "Green", path + "/postMeanObsMC.pdf")
+
+plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamTrue[:, 1], trainPos, "Blue", path + "/postVarTrue.pdf")
+plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamObs[:, 1], trainPosObs, "Green", path + "/postVarObs.pdf")
+plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamMC[:, 1], trainPosObs, "Green", path + "/postVarObsMC.pdf")
 
 results = np.zeros(3)
 results[0] = rmse(posteriorParamTrue[:, 0], testRealization)
