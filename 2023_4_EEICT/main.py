@@ -24,10 +24,10 @@ simSetup = {
     "nTrainPos": 10,
     "testPosRes": 10,           # Positions per spatial unit
     "regCoef": 0.001,           # Regularization coefficient of GP covariance matrix to ensure positive definiteness
-    "obsVar": 0.01,             # GP observation noise variance
-    "trainPosVar": 0.001,        # training positions observation variance
-    "nSamplesMC": 10,
-    "nSimulations": 1,
+    "obsVar": 0.0001,             # GP observation noise variance
+    "trainPosVar": 0.01,        # training positions observation variance
+    "nSamplesMC": 100,
+    "nSimulations": 100,
     "time": datetime.datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 }
 
@@ -302,38 +302,47 @@ def gprMC(gp, trainPosSamples, testPos, trainObs, obsVar):
 
 ################################################################################
 
-trainPos = genTrainPosUni(simSetup["spaceSize"], simSetup["nTrainPos"])
-testPos = genTestPosGrid(simSetup["spaceSize"], simSetup["testPosRes"])
-allPos = np.append(trainPos, testPos, axis=0)
+nSimulations = simSetup["nSimulations"]
 
-trueGP = GaussianProcess()
-trueGP.setMeanFuncConst(simSetup["meanGP"]["value"])
-trueGP.setCovFuncSquaredExp(simSetup["covGP"]["var"], simSetup["covGP"]["var_x"])
+allResults = np.zeros((nSimulations, 3))
 
-allRealizations = realizeGP(trueGP, allPos, simSetup["regCoef"])
-trainRealizations = allRealizations[0:trainPos.shape[0]]
-trainObs = trainRealizations + np.random.normal(0, np.sqrt(simSetup["obsVar"]), trainPos.shape[0])
+for simulationID in range(nSimulations):
+    trainPos = genTrainPosUni(simSetup["spaceSize"], simSetup["nTrainPos"])
+    testPos = genTestPosGrid(simSetup["spaceSize"], simSetup["testPosRes"])
+    allPos = np.append(trainPos, testPos, axis=0)
 
-testRealization = allRealizations[-testPos.shape[0]: None]
-posteriorParamTrue = gpr(trueGP, trainPos, testPos, trainObs, simSetup["obsVar"])
+    trueGP = GaussianProcess()
+    trueGP.setMeanFuncConst(simSetup["meanGP"]["value"])
+    trueGP.setCovFuncSquaredExp(simSetup["covGP"]["var"], simSetup["covGP"]["var_x"])
 
-trainPosObs = genPosSample(trainPos, simSetup["trainPosVar"])
-posteriorParamObs = gpr(trueGP, trainPosObs, testPos, trainObs, simSetup["obsVar"])
+    allRealizations = realizeGP(trueGP, allPos, simSetup["regCoef"])
+    trainRealizations = allRealizations[0:trainPos.shape[0]]
+    trainObs = trainRealizations + np.random.normal(0, np.sqrt(simSetup["obsVar"]), trainPos.shape[0])
 
-trainPosSamples = genPosSamples(trainPosObs, simSetup["trainPosVar"], simSetup["nSamplesMC"])
-posteriorParamMC = gprMC(trueGP, trainPosSamples, testPos, trainObs, simSetup["obsVar"])
+    testRealization = allRealizations[-testPos.shape[0]: None]
+    posteriorParamTrue = gpr(trueGP, trainPos, testPos, trainObs, simSetup["obsVar"])
 
-plotData(simSetup["spaceSize"], simSetup["testPosRes"], testRealization, trainPos, "Blue", path + "/realization.pdf")
-plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamTrue[:, 0], trainPos, "Blue", path + "/postMeanTrue.pdf")
-plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamObs[:, 0], trainPosObs, "Green", path + "/postMeanObs.pdf")
-plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamMC[:, 0], trainPosObs, "Green", path + "/postMeanObsMC.pdf")
+    trainPosObs = genPosSample(trainPos, simSetup["trainPosVar"])
+    posteriorParamObs = gpr(trueGP, trainPosObs, testPos, trainObs, simSetup["obsVar"])
 
-plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamTrue[:, 1], trainPos, "Blue", path + "/postVarTrue.pdf")
-plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamObs[:, 1], trainPosObs, "Green", path + "/postVarObs.pdf")
-plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamMC[:, 1], trainPosObs, "Green", path + "/postVarObsMC.pdf")
+    trainPosSamples = genPosSamples(trainPosObs, simSetup["trainPosVar"], simSetup["nSamplesMC"])
+    posteriorParamMC = gprMC(trueGP, trainPosSamples, testPos, trainObs, simSetup["obsVar"])
 
-results = np.zeros(3)
-results[0] = rmse(posteriorParamTrue[:, 0], testRealization)
-results[1] = rmse(posteriorParamObs[:, 0], testRealization)
-results[2] = rmse(posteriorParamMC[:, 0], testRealization)
-print("RMSE postMeanTrue: %s, postMeanObs: %s, postMeanMC: %s"%(sigDig(results[0]), sigDig(results[1]), sigDig(results[2])))
+    allResults[simulationID, 0] = rmse(posteriorParamTrue[:, 0], testRealization)
+    allResults[simulationID, 1] = rmse(posteriorParamObs[:, 0], testRealization)
+    allResults[simulationID, 2] = rmse(posteriorParamMC[:, 0], testRealization)
+
+    if nSimulations == 1:
+        plotData(simSetup["spaceSize"], simSetup["testPosRes"], testRealization, trainPos, "Blue", path + "/realization.pdf")
+        plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamTrue[:, 0], trainPos, "Blue", path + "/postMeanTrue.pdf")
+        plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamObs[:, 0], trainPosObs, "Green", path + "/postMeanObs.pdf")
+        plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamMC[:, 0], trainPosObs, "Green", path + "/postMeanObsMC.pdf")
+
+        plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamTrue[:, 1], trainPos, "Blue", path + "/postVarTrue.pdf")
+        plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamObs[:, 1], trainPosObs, "Green", path + "/postVarObs.pdf")
+        plotData(simSetup["spaceSize"], simSetup["testPosRes"], posteriorParamMC[:, 1], trainPosObs, "Green", path + "/postVarObsMC.pdf")
+    else:
+        print("simulationID: %d / %d"%(simulationID+1, nSimulations), end="\r")
+
+results = np.average(allResults, axis=0)
+print("\nRMSE postMeanTrue: %s, postMeanObs: %s, postMeanMC: %s"%(sigDig(results[0]), sigDig(results[1]), sigDig(results[2])))
