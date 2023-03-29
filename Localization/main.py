@@ -89,6 +89,9 @@ def plotData(variableNodes, filePath="fig", show=False):
         elif variableNode.type == "distribution":
             pointColor = None
             pointSymbol = None
+        else:   # variableNode.type == "unknown"
+            continue
+
         fig.add_trace(
             go.Scatter(
                 mode="markers",
@@ -157,6 +160,9 @@ for iterationBP in range(simSetup["nIterationsBP"]):
             elif factorNode.varNodeIdB == variableNode.id:
                 adjVarNodeIDs = np.append(adjVarNodeIDs, factorNode.varNodeIdA)
                 adjDists = np.append(adjDists, factorNode.distance)
+
+        if(len(adjVarNodeIDs) == 0):
+            continue
 
         if variableNode.type == "unknown":
             # Evaluate all position samples and randomly (uniformly) pick some of them
