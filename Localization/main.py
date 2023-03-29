@@ -1,8 +1,11 @@
 import numpy as np
 from scipy.stats import norm
-import matplotlib.pyplot as plt
 import os
 import datetime
+import plotly.graph_objects as go
+import plotly.io as pio
+
+pio.kaleido.scope.mathjax = None    # Surpress Plotly PDF export mathjax warning
 
 path = os.path.dirname(__file__)
 
@@ -74,6 +77,53 @@ def getDistance(positionA, positionB):
     distance = np.sqrt((positionA[0] - positionB[0])**2 + (positionA[1] - positionB[1])**2)
     return distance
 
+def plotData(variableNodes, filePath="fig", show=False):
+    fig = go.Figure()
+
+    nVarNodes = len(variableNodes)
+    for varNodeID in range(nVarNodes):
+        variableNode = variableNodes[varNodeID]
+        if variableNode.type == "known":
+            pointColor = "Blue"
+            pointSymbol = "x"
+        elif variableNode.type == "distribution":
+            pointColor = None
+            pointSymbol = None
+        fig.add_trace(
+            go.Scatter(
+                mode="markers",
+                x=variableNode.position[:, 0],
+                y=variableNode.position[:, 1],
+                name="ID: %d"%(varNodeID),
+                showlegend=False,
+                marker=dict(
+                    color=pointColor,
+                    symbol=pointSymbol,
+                    size=10,
+                    line=dict(
+                        color="Black",
+                        width=2
+                    )
+                )
+            )
+        )
+    fig.update_xaxes(
+        title_text = "Spatial dimension X"
+    )
+    fig.update_yaxes(
+        title_text = "Spatial dimension Y",
+        scaleanchor="x", 
+        scaleratio=1
+    )
+    fig.update_layout(
+        width =600, height=300, 
+        font_family="Serif", font_size=15,
+        margin=dict(l=0, r=0, t=0, b=0),
+    )
+    fig.write_image(filePath)
+    if show:
+        fig.show()
+
 ################################################################################
 ################################################################################
 
@@ -82,7 +132,8 @@ factorNodes = []
 
 for variableNode in simSetup["variableNodes"]:
     if variableNode["type"] == "known":
-        variableNodes.append(VariableNode(variableNode["type"], variableNode["position"]))
+        knownPos = np.array([variableNode["position"]])
+        variableNodes.append(VariableNode(variableNode["type"], knownPos))
     else:
         variableNodes.append(VariableNode(variableNode["type"], None))
 
@@ -115,7 +166,7 @@ for iterationBP in range(simSetup["nIterationsBP"]):
                 adjStackID = np.random.randint(0, len(adjVarNodeIDs))
                 adjNode = variableNodes[adjVarNodeIDs[adjStackID]]
                 if adjNode.type == "known":
-                    positionSamples[sampleID, :] = sampleAroundPos(adjNode.position, adjDists[adjStackID], simSetup["distObsVar"])
+                    positionSamples[sampleID, :] = sampleAroundPos(adjNode.position[0, :], adjDists[adjStackID], simSetup["distObsVar"])
                     sampleID += 1
                 elif adjNode.type == "distribution":
                     adjPosSampleID = np.random.randint(0, simSetup["nSamplesMC"])
@@ -134,7 +185,6 @@ for iterationBP in range(simSetup["nIterationsBP"]):
                 samplePD = 1
                 for adjStackID in range(len(adjVarNodeIDs)):
                     adjNode = variableNodes[adjVarNodeIDs[adjStackID]]
-                    adjPosition = np.zeros(2)
                     if adjNode.type == "known":
                         adjPosition = adjNode.position
                     elif adjNode.type == "distribution":
@@ -142,7 +192,7 @@ for iterationBP in range(simSetup["nIterationsBP"]):
                     else: # adjNode.type == "unknown"
                         continue
 
-                    sampleDistance = getDistance(variableNode.position[sampleID], adjPosition)
+                    sampleDistance = getDistance(variableNode.position[sampleID], adjPosition[0])
                     samplePD = samplePD * norm.pdf(sampleDistance, loc = adjDists[adjStackID], scale = np.sqrt(simSetup["distObsVar"]))
                     
                 weights[sampleID] = samplePD
@@ -162,11 +212,4 @@ for iterationBP in range(simSetup["nIterationsBP"]):
         else: # variableNode.type == "known"
             pass
 
-for variableNode in variableNodes[0:3]:
-    plt.scatter(variableNode.position[0], variableNode.position[1], marker="X", s=150)
-
-plt.scatter(*zip(*variableNodes[3].position), marker=".")
-
-ax = plt.gca()
-ax.set_aspect('equal', adjustable='box')
-plt.show()
+plotData(variableNodes, path + "/positions.pdf", show=True)
